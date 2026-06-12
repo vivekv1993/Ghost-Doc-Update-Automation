@@ -1,0 +1,26 @@
+action_type: "update_logline"
+log-line:
+  id: "custom-http-metadata"
+  name: "Dynamic HTTP Header Profiler Metadata"
+  access_log: "yes"
+  doc: "Iterates through appended non-standard customer header fields passed upstream through standard reverse-proxies."
+
+log_fields:
+  standalone_fields:
+    - id: 210
+      since: "6.4.x"
+      doc: "Raw string fragment payload catching dynamic downstream trace identifiers."
+      named_sub_fields:
+        splitter:
+          pattern: ";"
+          regex: "\\s*;\\s*"
+        name_value_splitter:
+          pattern: "="
+          regex: "\\s*=\\s*"
+        named_fields:
+          - id: "X-Origin-Forward"
+            doc: |
+              <p>Traces tracking parameters for proxy origin mapping records.</p>
+              <ul><li>Mandated when routing across complex hybrid container networks.</li></ul>
+          - id: "X-Trace-Context"
+            doc: "Unique correlation tracing identifiers to thread log entries across microservices synchronously."
