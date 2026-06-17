@@ -47,32 +47,61 @@ def get_ui_state_updates(config):
 def start_agent(ticket_id: str, description: str):
     if not ticket_id or not description:
         gr.Warning("Please provide both a Ticket ID and a Description.")
-        return get_ui_state_updates(None) # Will crash if config is None, so ensure basic validation
+        # Return a safe default if empty
+        yield (
+            gr.update(value="Status: ⚪ Standby"),
+            gr.update(visible=False), gr.update(),
+            gr.update(visible=False), gr.update()
+        )
+        return
         
     config = create_sandbox_config(ticket_id.strip())
     
-    # Kick off the graph with the manual description
-    # Using .invoke() runs it until it hits the first interrupt
+    # 1. INSTANT UI UPDATE: Tell the user we are working on it
+    yield (
+        gr.update(value="Status: ⏳ Analyzing ticket and compiling YAML... (This may take a few seconds)"),
+        gr.update(visible=False), gr.update(), # Hide Clarification UI
+        gr.update(visible=False), gr.update()  # Hide Review UI
+    )
+    
+    # 2. HEAVY LIFTING: Run the LangGraph/LLM process
     langgraph_app.invoke({"user_input": description}, config)
     
-    return get_ui_state_updates(config)
+    # 3. FINAL UI UPDATE: Show the actual result (Clarification or Review)
+    yield get_ui_state_updates(config)
 
 def submit_clarification(ticket_id: str, clarification_text: str):
     config = create_sandbox_config(ticket_id.strip())
     state = langgraph_app.get_state(config)
     
-    # Combine the original input with the new clarification
-    original_input = state.values.get("user_input", "")
-    new_input = f"{original_input}\n[User Clarification]: {clarification_text}"
+    # 1. IMMEDIATE UI UPDATE (5 outputs)
+    yield (
+        gr.update(value="Status: ⏳ Processing Clarification..."),
+        gr.update(visible=False), gr.update(), # Hide Clarification UI
+        gr.update(visible=False), gr.update()  # Hide Review UI
+    )
     
-    # Inject the updated text and resume the graph
-    langgraph_app.update_state(config, {"user_input": new_input}, as_node="ask_human")
-    
-    # Stream with None tells LangGraph to resume from the current interrupt
-    for _ in langgraph_app.stream(None, config):
-        pass
+    try:
+        original_input = state.values.get("user_input", "")
+        new_input = f"{original_input}\n[User Clarification]: {clarification_text}"
         
-    return get_ui_state_updates(config)
+        langgraph_app.update_state(config, {"user_input": new_input}, as_node="ask_human")
+        
+        for _ in langgraph_app.stream(None, config):
+            pass
+            
+        # 2. FINAL UI UPDATE (5 outputs)
+        # If it succeeds (or asks for MORE info), this handles the UI routing perfectly
+        yield get_ui_state_updates(config)
+        
+    except Exception as e:
+        # 3. CRASH CAPTURE (5 outputs)
+        yield (
+            gr.update(value="Status: 🔴 System Error"),
+            gr.update(visible=True),                                  # Bring back Clarification UI
+            gr.update(value=f"### ⚠️ System Crash:\n```text\n{str(e)}\n```"), # Show the Python error
+            gr.update(visible=False), gr.update()                     # Keep Review UI hidden
+        )
 
 def deploy_yaml(ticket_id: str, edited_yaml: str):
     config = create_sandbox_config(ticket_id.strip())
@@ -172,4 +201,4 @@ with gr.Blocks(title="Akamai Config Gatekeeper", theme=gr.themes.Default(neutral
     )
 
 if __name__ == "__main__":
-    ui.launch(server_port=7860)
+    ui.launch(server_port=7960)

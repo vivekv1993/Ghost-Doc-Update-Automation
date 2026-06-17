@@ -123,15 +123,32 @@ def deploy_to_master(yaml_file, schema_file, master_file, output_file):
             # Start merging at level 1 (since <log-line> is indented 1 level deep in <log-format>)
             merge_nodes(existing_node, fragment, level=1)
             print(f"       [SUCCESS] Smart deep merge complete for <log-line id='{fragment_id}'>.")
-            
         else:
-            # If the log-line doesn't exist at all, we can safely pretty-print the whole fragment
             ET.indent(fragment, space="  ", level=1)
             fragment.tail = "\n"
-            if len(root) > 0:
-                root[-1].tail = "\n  "
-            root.append(fragment)
-            print(f"       [SUCCESS] Appended brand new <log-line id='{fragment_id}'>.")
+            
+            # 1. Find all existing log-lines in the root
+            existing_log_lines = root.findall("log-line")
+            
+            if existing_log_lines:
+                # 2. Get the very last log-line currently in the file
+                last_log_line = existing_log_lines[-1]
+                
+                # 3. Find its exact index position in the document
+                insert_index = list(root).index(last_log_line) + 1
+                
+                # 4. Fix the tail spacing of the old last line so our new one drops cleanly
+                last_log_line.tail = "\n  "
+                
+                # 5. Insert the new fragment at that specific index
+                root.insert(insert_index, fragment)
+            else:
+                # Fallback: If for some reason there are ZERO log lines in the file, just append
+                if len(root) > 0:
+                    root[-1].tail = "\n  "
+                root.append(fragment)
+                
+            print(f"       [SUCCESS] Inserted brand new <log-line id='{fragment_id}'>.")
 
     print(f"[INFO] Step 4: Deployment complete! Changes saved to '{output_file}'.")
     
