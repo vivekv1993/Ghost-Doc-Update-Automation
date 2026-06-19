@@ -1,5 +1,5 @@
 import gradio as gr
-from main import app as langgraph_app
+from QueryTable.main import app as langgraph_app
 
 # --- EVENT HANDLERS ---
 

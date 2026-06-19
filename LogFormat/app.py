@@ -1,7 +1,7 @@
 import gradio as gr
 import os
-from agent import BASE_DIR, app as langgraph_app, create_sandbox_config
-from xmlGenerator import UniversalXMLGenerationEngine
+from LogFormat.agent import BASE_DIR, app as langgraph_app, create_sandbox_config
+from LogFormat.xmlGenerator import UniversalXMLGenerationEngine
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import yaml

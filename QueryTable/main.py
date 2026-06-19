@@ -10,7 +10,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
 # Import the Pydantic schema we built earlier
-from pyd import MDRQueryTable 
+from QueryTable.pyd import MDRQueryTable 
 import dotenv
 #TODO-> last_updated, etc. -> Read the doc above the ghost_h3_server.xml file.
 # 1. Define the Graph State

@@ -8,8 +8,8 @@ sys.path.append(os.path.join(root_dir, 'Project'))
 sys.path.append(os.path.join(root_dir, 'GhostH3'))
 
 # 2. Import the UIs
-from Project.app import ui as log_format_ui
-from GhostH3.app import ui as query_table_ui
+from LogFormat.app import ui as log_format_ui
+from QueryTable.app import ui as query_table_ui
 
 # 3. Use TabbedInterface to safely merge the pre-built Blocks
 unified_app = gr.TabbedInterface(

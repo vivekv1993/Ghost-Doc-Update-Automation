@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 import yaml
 import json
 import re
-from xmlGenerator import UniversalXMLGenerationEngine
+from LogFormat.xmlGenerator import UniversalXMLGenerationEngine
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
