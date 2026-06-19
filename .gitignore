@@ -8,3 +8,4 @@ log-format.xsl
 QueryTable/.env
 LogFormat/.env
 LogFormat/log-format.xml
+.env
