@@ -1,3 +1,15 @@
+"""
+Gradio Frontend
+~~~~~~~~~~~~~~~~~~~~
+This module provides the graphical user interface (GUI) for the LangGraph 
+automation workflow using Gradio. It serves as the primary human-in-the-loop 
+bridge, surfacing the graph's internal state to a web browser.
+
+Through this interface, developers can trigger Jira ticket extractions, 
+review and edit the AI-generated XML in a live code editor, and manually 
+approve the finalized payload to resume the graph's validation and save nodes.
+
+"""
 import gradio as gr
 from QueryTable.main import app as langgraph_app
 

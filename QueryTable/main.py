@@ -1,3 +1,22 @@
+"""
+This module defines, compiles, and executes a stateful LangGraph automation 
+pipeline. It parses raw database schema definitions from developer Jira tickets, 
+transforms them into structured Pydantic objects, renders them into Akamai MDR XML 
+tables using Jinja2, runs validation diagnostics, and orchestrates a 
+human-in-the-loop authorization checkpoint.
+
+Workflow node Architecture: 
+    1. Extract(`extract_jira_node`) : This node passes the the text entered by the user to an LLM which produces a structured MDRQueryTable Pydantic model.
+    2. Render(`render_xml_node`) : This takes the Pydantic data and converts it into the xml using the Jinja2 template and stores it in memory.
+    3. Validate(`validate_xml_node`): This nodes validate the in-memory XML using xmllint binary.
+    4. Save(`save_xml_node`): Writes the finalized, approved XML payload into an isolated sandbox subdirectory inside `agent_workspaces/` tracked by `thread_id`.
+
+State Management & Human Intervention:
+    The application utilizes an in-memory `MemorySaver` checkpointer. The graph 
+    is compiled with a hard pause flag: `interrupt_before=["validate_xml"]`. 
+    This suspends execution right after the XML is rendered so that it can be edited by the user before it passes through the validation block.
+"""
+
 import os
 import subprocess
 from typing import TypedDict, Optional
@@ -42,20 +61,8 @@ structured_llm = base_llm.with_structured_output(MDRQueryTable)
 def extract_jira_node(state: GraphState) -> dict:
     """Node 1: Sends the raw text to the LLM and extracts structured data."""
     print("[Node: Extract] AI Agent is processing Jira ticket text via OpenRouter...")
-    system_prompt = (
-        "You are an expert Akamai system documentation agent tasked with extracting "
-        "database table schema definitions from developer Jira tickets into a JSON schema.\n\n"
-        
-        "STRICT EXTRACTION RULES:\n"
-        "1. XHTML WRAPPING: You MUST wrap the 'table_desc' and EVERY column 'description' "
-        "in explicit, paired html paragraph tags. (e.g., '<p>Your text here</p>'). Never leave it as raw text.\n"
-        "2. PROVIDERS: Look closely for mentioned networks or platforms like ESSL, FreeFlow, or NetStorage. "
-        "Do NOT put the publisher or team name into the providers list.\n"
-        "3. QUERY RESULTS: For the 'query_result' field, generate a clean, mock text-based output "
-        "table printout showing sample rows. CRITICAL: Do NOT wrap the 'query_to_send' or 'query_result' "
-        "in <pre> tags or any other HTML tags. Output plain text only.\n"
-        "4. TYPES: If column data types are ambiguous or missing, default to 'string'."
-    )
+    with open(os.path.join(BASE_DIR, "systemPrompt.txt"), "r") as f:
+        system_prompt = f.read()
     try:
         # Invoke the structured LLM using standard LangChain formatting
         extracted_payload = structured_llm.invoke([

@@ -7,9 +7,13 @@ This project aims to automate the process of updating the documentation for Ghos
 To run this project, you will need to add the following environment variables to your .env file in 
 the project root.
 
-A Github PAT :
+#### A Github PAT :
 
 `GITHUB_TOKEN`
+
+#### System Binaries: 
+
+Requires `xmllint` to be installed on the local host machine 
 
 ## Run Locally
 
