@@ -3,6 +3,9 @@ import yaml
 import json
 import re
 from xmlGenerator import UniversalXMLGenerationEngine
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def merge_nodes(target, source, level=1):
     """
@@ -169,8 +172,8 @@ def deploy_to_master(yaml_file, schema_file, master_file, output_file):
 
 if __name__ == "__main__":
     deploy_to_master(
-        yaml_file="input.yaml", 
-        schema_file="schema_map.json", 
-        master_file="log-format.xml", 
-        output_file="log-format-updated.xml"
+        yaml_file=os.path.join(BASE_DIR, "input.yaml"), 
+        schema_file=os.path.join(BASE_DIR, "schema_map.json"), 
+        master_file=os.path.join(BASE_DIR, "log-format.xml"), 
+        output_file=os.path.join(BASE_DIR, "log-format-updated.xml")
     )

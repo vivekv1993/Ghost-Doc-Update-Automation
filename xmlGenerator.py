@@ -2,6 +2,9 @@ import json
 import yaml
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class UniversalXMLGenerationEngine:
     def __init__(self, yaml_data, schema_map):
@@ -249,10 +252,10 @@ class UniversalXMLGenerationEngine:
 
 if __name__ == "__main__":
     try:
-        with open("schema_map.json", "r", encoding="utf-8") as json_file:
+        with open(os.path.join(BASE_DIR, "schema_map.json"), "r", encoding="utf-8") as json_file:
             loaded_schema = json.load(json_file)
             
-        with open("input.yaml", "r", encoding="utf-8") as yaml_file:
+        with open(os.path.join(BASE_DIR, "input.yaml"), "r", encoding="utf-8") as yaml_file:
             loaded_yaml = yaml.safe_load(yaml_file)
 
         print("Compiling advanced YAML layout into XML based on blueprint rules...")

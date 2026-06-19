@@ -1,6 +1,5 @@
-from typing import TypedDict, List, Optional, Literal
+from typing import TypedDict, List, Optional
 import yaml
-from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chat_models import init_chat_model
@@ -10,14 +9,13 @@ import os
 import dotenv
 from graph import CompilerPayload
 from deploy import deploy_to_master
-import tempfile
-import subprocess
-import sys
 import shutil
-from xmlGenerator import UniversalXMLGenerationEngine
 
 dotenv.load_dotenv()
+os.environ["LANGGRAPH_ALLOWED_MSGPACK_MODULES"] = "graph"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(BASE_DIR)
 # TODO -> Move Memory Saver to a database.
 # TODO -> Add an MCP server for fetching the details of Jira Ticket.
 # GRAPH STATE MEMORY
@@ -38,30 +36,8 @@ def unified_extractor_node(state: AgentState) -> dict:
     Cognitive node: Extracts clean schema models from raw text inputs.
     """
     raw_prompt = state["user_input"]
-    system_instruction = (
-        "You are an expert compiler extraction assistant for an Akamai logging platform.\n"
-        "Your task is to analyze the user's request and map it strictly into the schema.\n\n"
-        
-        "CRITICAL DATA TYPE RULES:\n"
-        "1. STRING COERCION: All identifiers, tokens, and IDs (including log line IDs, field IDs, "
-        "sub-field IDs, and sub-char IDs) MUST be extracted as strings, even if they are pure digits "
-        "(e.g., use '70' instead of 70).\n"
-        "2. LITERAL PRESERVATION: Extract delimiters, status characters, and symbols (such as '|' or '?') "
-        "exactly as strings without modifying, escaping, or omitting them.\n\n"
-        
-        "CRITICAL ROUTING RULES:\n"
-        "1. If the user asks to add/append a changelog, set action_type to 'append_changelog', "
-        "extract the author, date, and version, and ONLY fill the changelog_payload. Leave logline_payload null.\n"
-        "2. If the user asks to modify a log field, set action_type to 'update_logline', "
-        "EXTRACT THE TARGET LOG LINE ID (e.g., 'r', 'f'), and ONLY fill the logline_payload.\n"
-        "   - STRUCTURAL HIERARCHY: You MUST place any extracted 'standalone_fields' or 'log_field_groups' "
-        "INSIDE the 'log_fields' wrapper object. Ensure child elements are nested accurately under their "
-        "respective parent field IDs.\n"
-        "   - Leave changelog_payload null.\n"
-        "3. NESTED LAZINESS: Do not hallucinate deep nested data. If a sub_field, bitmask, or enum is not "
-        "explicitly mentioned by the user, leave it null. Do not generate empty nested objects.\n"
-        "4. NEVER hallucinate IDs. If a user mentions 'r77', the target log line ID is 'r'."
-    )
+    with open(os.path.join(BASE_DIR, "systemPrompt.txt"), "r") as f:
+     system_instruction = f.read()
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_instruction),
@@ -69,11 +45,11 @@ def unified_extractor_node(state: AgentState) -> dict:
     ])
     
     llm = init_chat_model(
-        "openai/gpt-oss-120b:free",
-        model_provider="openai",
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENAI_API_KEY"),
-        temperature=0.0
+    "gpt-4o-mini",                     # The model you want to target on GitHub
+    model_provider="openai",            # Still uses the openai underlying class
+    base_url="https://models.github.ai/inference",  # Point to GitHub's inference endpoint
+    api_key=os.getenv("GITHUB_TOKEN"),  # Make sure GITHUB_TOKEN is defined in your .env file
+    temperature=0.0
     )
     structured_llm = llm.with_structured_output(CompilerPayload)
     
@@ -147,14 +123,14 @@ def create_sandbox_config(ticket_id: str) -> dict:
     Also handles seeding the sandbox with the master schema/xml files.
     """
     # Define the isolated folder for this specific ticket
-    base_workspace = "agent_workspaces"
+    base_workspace = os.path.join(ROOT_DIR, "agent_workspaces")
     ticket_workspace = os.path.join(base_workspace, ticket_id)
     
     # Create the folder if it doesn't exist
     os.makedirs(ticket_workspace, exist_ok=True)
     
-    shutil.copy("log-format.xml", os.path.join(ticket_workspace, "log-format.xml"))
-    shutil.copy("schema_map.json", os.path.join(ticket_workspace, "schema_map.json"))
+    shutil.copy(os.path.join(BASE_DIR, "log-format.xml"), os.path.join(ticket_workspace, "log-format.xml"))
+    shutil.copy(os.path.join(BASE_DIR, "schema_map.json"), os.path.join(ticket_workspace, "schema_map.json"))
 
     # Return the strict, dynamic paths for LangGraph
     return {
@@ -215,6 +191,7 @@ workflow.add_node("unified_extractor", unified_extractor_node)
 workflow.add_node("yaml_compiler", yaml_compiler_node)
 workflow.add_node("ask_human", ask_human_node)
 workflow.add_node("deployment", deployment_node)
+workflow.add_node("review_yaml", review_yaml_node)
 
 # 2. Define the starting edge
 workflow.add_edge(START, "unified_extractor")
@@ -234,7 +211,6 @@ workflow.add_conditional_edges(
 workflow.add_edge("ask_human", "unified_extractor")
 
 # 1. Register the new review node
-workflow.add_node("review_yaml", review_yaml_node)
 
 # 2. Update the edges: Compiler flows into Review, Review flows into Downstream Execution
 workflow.add_edge("yaml_compiler", "review_yaml")
