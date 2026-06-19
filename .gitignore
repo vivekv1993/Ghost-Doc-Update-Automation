@@ -1,0 +1,10 @@
+venv/
+agent_workspaces/
+QueryTable/__pycache__/
+LogFormat/__pycache__/
+log-format-updated.xml
+log-format.dtd
+log-format.xsl
+QueryTable/.env
+LogFormat/.env
+LogFormat/log-format.xml
