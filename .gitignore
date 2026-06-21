@@ -7,6 +7,7 @@ log-format.dtd
 log-format.xsl
 QueryTable/.env
 QueryTable/docs/build/
+LogFormat/docs/build/
 LogFormat/.env
 LogFormat/log-format.xml
 .env

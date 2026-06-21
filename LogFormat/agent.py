@@ -1,3 +1,32 @@
+"""
+Log Format Agent Orchestrator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module defines and compiles a stateful LangGraph workflow designed to safely 
+automate updates to Akamai LogFormat XML configurations. It parses raw text instructions 
+(e.g., Jira ticket descriptions), extracts structured modifications using an LLM, 
+compiles them into a YAML configuration, and applies them to a master XML file.
+
+Workflow Architecture:
+    1. Extract (``unified_extractor_node``): Parses human input via gpt-4o-mini to 
+       generate a strictly validated Pydantic model (``CompilerPayload``).
+    2. Route (``route_after_extraction``): Evaluates the extracted data for missing 
+       mandatory fields.
+    3. Ask Human (``ask_human_node``): An interrupt node triggered if required 
+       attributes are missing from the user's initial prompt.
+    4. Compile (``yaml_compiler_node``): Transforms the structured Pydantic payload 
+       into a clean YAML string.
+    5. Review (``review_yaml_node``): An interrupt node that pauses execution, allowing 
+       a human to review and manually edit the staged YAML.
+    6. Deploy (``deployment_node``): Writes the approved YAML to an isolated sandbox 
+       and triggers the underlying ``deploy_to_master`` XML parsing engine.
+
+State Management & Concurrency:
+    The graph utilizes a ``MemorySaver`` checkpointer to pause at human-in-the-loop 
+    checkpoints. To support concurrent web executions, it relies on dynamically 
+    generated sandboxes (``create_sandbox_config``) to isolate files per thread.
+"""
+
 from typing import TypedDict, List, Optional
 import yaml
 from langgraph.graph import StateGraph, START, END
@@ -34,6 +63,13 @@ class AgentState(TypedDict):
 def unified_extractor_node(state: AgentState) -> dict:
     """
     Cognitive node: Extracts clean schema models from raw text inputs.
+    
+    This node takes the user's raw prompt, wraps it in the system instructions, 
+    and invokes a structured LLM call. It also performs a preliminary 
+    check for missing metadata (like author, version, or target IDs).
+
+    :param state: The current state of the graph.
+    :return: A dictionary containing the parsed Pydantic payload and a list of any missing attributes.
     """
     raw_prompt = state["user_input"]
     with open(os.path.join(BASE_DIR, "systemPrompt.txt"), "r") as f:
@@ -85,6 +121,12 @@ def unified_extractor_node(state: AgentState) -> dict:
 def yaml_compiler_node(state: AgentState) -> dict:
     """
     Deterministic node: Converts the validated Pydantic model into a YAML string.
+    
+    Strips out any empty or null values from the structured payload and formats 
+    it into a clean YAML representation, ready for human review.
+
+    :param state: The current state of the graph.
+    :return: A dictionary mapping the compiled YAML string to the state.
     """
     # model_dump(exclude_none=True) strips out all the nulls
     payload_dict = state["parsed_payload"].model_dump(exclude_none=True, by_alias=True)
@@ -120,7 +162,13 @@ def review_yaml_node(state: AgentState) -> dict:
 def create_sandbox_config(ticket_id: str) -> dict:
     """
     Generates a unique sandboxed configuration dictionary for a specific Jira ticket.
-    Also handles seeding the sandbox with the master schema/xml files.
+    
+    This function ensures concurrent agent runs do not overwrite each other's XML 
+    files. It creates an isolated workspace directory inside ``agent_workspaces/`` 
+    and seeds it with a fresh copy of the master XML and schema map.
+
+    :param ticket_id: The unique identifier (e.g., Jira ticket number) used to name the sandbox.
+    :return: A LangGraph RunnableConfig dictionary containing strict, isolated file paths.
     """
     # Define the isolated folder for this specific ticket
     base_workspace = os.path.join(ROOT_DIR, "agent_workspaces")
@@ -144,8 +192,19 @@ def create_sandbox_config(ticket_id: str) -> dict:
     }
 
 def deployment_node(state: AgentState, config: RunnableConfig) -> dict:
-    """Writes the approved YAML to disk and triggers the deployment script."""
+    """
+    Writes the approved YAML to disk and triggers the deployment script.
     
+    This node executes the final side-effects of the graph. It enforces a fail-fast 
+    rule to ensure all required sandbox paths are present in the configuration. Once 
+    verified, it writes the in-memory YAML to disk and hands execution off to the 
+    underlying ``deploy_to_master`` script.
+
+    :param state: The current state of the graph.
+    :param config: The graph configuration containing isolated sandbox paths.
+    :return: A dictionary containing the final deployment status string.
+    :raises ValueError: If the required isolated file paths are missing from the config.
+    """
     # 1. Fetch paths from config
     paths = config.get("configurable", {})
     yaml_file = paths.get("yaml_file")
