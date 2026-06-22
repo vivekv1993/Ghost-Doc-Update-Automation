@@ -1,3 +1,22 @@
+"""
+This module defines, compiles, and executes a stateful LangGraph automation 
+pipeline. It parses raw database schema definitions from developer Jira tickets, 
+transforms them into structured Pydantic objects, renders them into Akamai MDR XML 
+tables using Jinja2, runs validation diagnostics, and orchestrates a 
+human-in-the-loop authorization checkpoint.
+
+Workflow node Architecture: 
+    1. Extract(`extract_jira_node`) : This node passes the the text entered by the user to an LLM which produces a structured MDRQueryTable Pydantic model.
+    2. Render(`render_xml_node`) : This takes the Pydantic data and converts it into the xml using the Jinja2 template and stores it in memory.
+    3. Validate(`validate_xml_node`): This nodes validate the in-memory XML using xmllint binary.
+    4. Save(`save_xml_node`): Writes the finalized, approved XML payload into an isolated sandbox subdirectory inside `agent_workspaces/` tracked by `thread_id`.
+
+State Management & Human Intervention:
+    The application utilizes an in-memory `MemorySaver` checkpointer. The graph 
+    is compiled with a hard pause flag: `interrupt_before=["validate_xml"]`. 
+    This suspends execution right after the XML is rendered so that it can be edited by the user before it passes through the validation block.
+"""
+
 import os
 import subprocess
 from typing import TypedDict, Optional
@@ -41,21 +60,9 @@ structured_llm = base_llm.with_structured_output(MDRQueryTable)
 # 3. Define the Graph Nodes (The Steps)
 def extract_jira_node(state: GraphState) -> dict:
     """Node 1: Sends the raw text to the LLM and extracts structured data."""
-    print("[Node: Extract] AI Agent is processing Jira ticket text via OpenRouter...")
-    system_prompt = (
-        "You are an expert Akamai system documentation agent tasked with extracting "
-        "database table schema definitions from developer Jira tickets into a JSON schema.\n\n"
-        
-        "STRICT EXTRACTION RULES:\n"
-        "1. XHTML WRAPPING: You MUST wrap the 'table_desc' and EVERY column 'description' "
-        "in explicit, paired html paragraph tags. (e.g., '<p>Your text here</p>'). Never leave it as raw text.\n"
-        "2. PROVIDERS: Look closely for mentioned networks or platforms like ESSL, FreeFlow, or NetStorage. "
-        "Do NOT put the publisher or team name into the providers list.\n"
-        "3. QUERY RESULTS: For the 'query_result' field, generate a clean, mock text-based output "
-        "table printout showing sample rows. CRITICAL: Do NOT wrap the 'query_to_send' or 'query_result' "
-        "in <pre> tags or any other HTML tags. Output plain text only.\n"
-        "4. TYPES: If column data types are ambiguous or missing, default to 'string'."
-    )
+    print("[Node: Extract] AI Agent is processing Jira ticket ...")
+    with open(os.path.join(BASE_DIR, "systemPrompt.txt"), "r") as f:
+        system_prompt = f.read()
     try:
         # Invoke the structured LLM using standard LangChain formatting
         extracted_payload = structured_llm.invoke([
@@ -148,6 +155,16 @@ def validate_xml_node(state: GraphState) -> dict:
         print(f"{error_msg}")
         return {"error": error_msg}
 
+def route_after_validation(state: GraphState) -> str:
+    """Checks if validation passed. If it failed, loop back for human review."""
+    if state.get("error"):
+        # Loop back, Because interrupt_before=["validate_xml"] is set, 
+        # the graph will immediately pause again so the user can fix it.
+        return "validate_xml" 
+    
+    # If no error, proceed to save
+    return "save_xml"
+
 # 4. Build and Compile the Graph Workflow
 workflow = StateGraph(GraphState)
 
@@ -161,79 +178,16 @@ workflow.add_node("validate_xml", validate_xml_node)
 workflow.add_edge(START, "extract_jira")
 workflow.add_edge("extract_jira", "render_xml")
 workflow.add_edge("render_xml", "validate_xml")
-workflow.add_edge("validate_xml", "save_xml")
+workflow.add_conditional_edges(
+    "validate_xml",             # The node we are coming from
+    route_after_validation,     # The routing logic
+    {
+        "validate_xml": "validate_xml", # If router says 'validate_xml', loop back
+        "save_xml": "save_xml"          # If router says 'save_xml', move forward
+    }
+)
 workflow.add_edge("save_xml", END)
 
 # Compile into an executable application
 memory = MemorySaver()
 app = workflow.compile(checkpointer=memory, interrupt_before=["validate_xml"])
-
-# 5. Execute the graph
-if __name__ == "__main__":
-    # Sample developer note simulating closed ticket contents
-    ticket_payload = """
-    Please generate a new MDR Query Table with the following details:
-
-    Name: cache_efficiency
-
-    Publisher: Core Platform Engineering
-
-    Owner: Jane Doe
-
-    Table Description: Tracks cache hit rates and bypass reasons across all edge groups.
-
-    Notes: Supported platforms include ESSL and FreeFlow.
-
-    Useful Queries: 
-    1. Query: "SELECT hit_rate FROM cache_efficiency WHERE hit_rate < 90" | Description: "Find low cache hit rates"
-    2. Query: "SELECT bypass_reason, COUNT(*) FROM cache_efficiency GROUP BY bypass_reason" | Description: "Aggregate bypass reasons"
-
-    Columns:
-    Name: cache_group_id | Type: int | Description: Unique identifier for the edge group
-    Name: hit_rate | Type: float | Description: Percentage of requests hit
-    Name: bypass_reason | Type: string | Description: Why a request skipped cache, if applicable
-    """
-   
-    # Set a unique thread ID for this specific run so LangGraph can track memory
-    config = {"configurable": {"thread_id": "jira-ticket-test-001"}}
-
-    # 1. Start the graph (It will run Extract -> Render, then PAUSE before Validate)
-    initial_inputs = {"jira_ticket_text": ticket_payload}
-    for event in app.stream(initial_inputs, config):
-        pass # Stream output omitted for brevity
-        
-    print("\nGRAPH PAUSED: Ready for Human Review.")
-    
-    # 2. Get the current state to show the human
-    current_state = app.get_state(config)
-    staged_xml = current_state.values.get("xml_string")
-    
-    if not current_state.values.get("error"):
-        print("\n--- STAGED XML ---")
-        print(staged_xml)
-        print("------------------\n")
-        
-        # --- HUMAN INTERVENTION HAPPENS HERE ---
-        print("[Human] Making final edits and approving...")
-        # Simulate an edit (e.g., human fixes a description)
-        edited_xml = staged_xml 
-        
-        # 3. Inject the edited XML back into the state
-        # Using as_node="render_xml" tricks LangGraph into thinking the render node 
-        # just finished, so it knows to step into validate_xml next.
-        app.update_state(config, {"xml_string": edited_xml}, as_node="render_xml")
-        
-        # 4. Resume the graph (It will run Validate -> Save)
-        print("\nRESUMING GRAPH: Validating and saving...")
-        for event in app.stream(None, config):
-            pass
-            
-        # 5. Check the final outcome
-        final_state = app.get_state(config)
-        if final_state.values.get("error"):
-            # If the human introduced a broken XML tag, the validate node catches it here!
-            print(f"\nExecution stopped! The edited XML failed validation:\n{final_state.values.get('error')}")
-        else:
-            print(f"\nSuccess! Final XML Output File Generated: {final_state.values.get('xml_filename')}")
-    else:
-        print(f"\nExecution stopped due to earlier error: {current_state.values.get('error')}")

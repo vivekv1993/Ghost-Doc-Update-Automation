@@ -1,3 +1,23 @@
+"""
+Log Format XML Deployment Engine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module is responsible for the physical modification of the master Akamai 
+LogFormat XML file. 
+
+Architectural Context:
+    Standard XML parsing libraries in Python are notoriously destructive to 
+    formatting. If you parse an XML file and write it back to disk, the library 
+    will strip out all comments, processing instructions, and custom whitespace, 
+    resulting in a massive, unreadable Git diff. 
+
+    To solve this, this engine utilizes a "Surgical Injection" and "Deep Merge" 
+    strategy. Instead of rewriting the master file, it parses the file while 
+    preserving comments and PIs, locates the exact insertion point, and modifies 
+    only the target nodes in-place. It carefully calculates the indentation depth 
+    (``level``) of newly injected fragments to ensure the resulting XML file 
+    maintains its pristine, human-readable formatting.
+"""
 import xml.etree.ElementTree as ET
 import yaml
 import json
@@ -9,8 +29,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def merge_nodes(target, source, level=1):
     """
-    Recursively deep merges a source XML node into a target XML node.
-    Only formats newly appended nodes, preserving the formatting of existing nodes.
+    Recursively deep merges a source XML tree into a target XML tree in-place.
+    
+    This function traverses the source fragment and matches nodes against the 
+    target using unique identifiers (``id``, ``since``, ``pattern``) or tag names. 
+    It updates attributes and text safely. For brand new nodes, it formats their 
+    indentation dynamically based on the current depth level before appending 
+    them, ensuring existing surrounding whitespace remains untouched.
+
+    :param target: The existing XML Element acting as the destination.
+    :param source: The newly generated XML Element fragment to be injected.
+    :param level: The current indentation depth (used for precise whitespace formatting).
+    :return: None. The ``target`` Element is modified in-place.
     """
     # 1. Merge attributes (Update existing, add new)
     for k, v in source.attrib.items():
@@ -87,8 +117,22 @@ def merge_nodes(target, source, level=1):
             target.append(source_child)
 
 def deploy_to_master(yaml_file, schema_file, master_file, output_file):
-    """Compiles YAML and performs an intelligent, non-destructive merge/upsert on the master file."""
+    """
+    Orchestrates the conversion of YAML payloads into a non-destructive XML merge.
     
+    This function acts as the primary executor. It translates the sandboxed YAML 
+    configuration into an XML fragment using the UniversalXMLGenerationEngine. It 
+    then evaluates the ``action_type`` (e.g., ``append_changelog``, ``update_logline``) 
+    to locate the exact insertion point in the master XML file. Finally, it ensures 
+    critical headers (like the DOCTYPE and xml-stylesheet declarations) are preserved 
+    when writing the final output to disk.
+
+    :param yaml_file: Absolute path to the sandboxed YAML input file.
+    :param schema_file: Absolute path to the JSON schema map.
+    :param master_file: Absolute path to the original master XML configuration.
+    :param output_file: Absolute path where the resulting merged XML should be saved.
+    :return: None. The final XML string is written directly to disk.
+    """
     with open(schema_file, "r", encoding="utf-8") as sf:
         schema = json.load(sf)
     with open(yaml_file, "r", encoding="utf-8") as yf:

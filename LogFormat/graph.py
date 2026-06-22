@@ -1,3 +1,34 @@
+"""
+Log Format Pydantic Schema Registry
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module defines the strict, hierarchical Pydantic schemas used to enforce 
+structured JSON output from the LangChain LLM extraction node. 
+
+Architectural Context:
+    The classes defined here mirror the deeply nested XML structure of the Akamai 
+    LogFormat configuration. The LLM relies heavily on the `Field(description="...")` 
+    attributes to understand how to parse raw developer instructions into the correct 
+    nodes.
+
+Schema Hierarchy (Top-Down):
+    1. **Master Payload:** ``CompilerPayload`` acts as the root router. It uses a 
+       literal ``action_type`` to determine if the LLM extracted a changelog entry 
+       or a structural log-line modification.
+    2. **Log Line Containers:** ``LogLineUpdate`` and ``LogLineVersionUpdate`` track 
+       top-level category metadata and historical version boundaries.
+    3. **Field Routing:** ``LogField`` and ``LogFieldGroup`` define the exact sequential 
+       placement of data fields within a log line.
+    4. **Intermediate Containers:** ``SubFields`` and ``NamedSubFields`` manage 
+       nested data blocks and string splitting logic.
+    5. **Leaf Nodes:** Deepest base components like ``Bitmask``, ``EnumItem``, and 
+       ``StatusChars`` capture specific enumerations, flag bits, and character definitions.
+
+Note:
+    ``SubFieldItem`` and ``NamedFieldItem`` utilize ``model_rebuild()`` at the bottom 
+    of the file to resolve circular type referencing required by Pydantic V2 for 
+    infinitely recursive block containers.
+"""
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 

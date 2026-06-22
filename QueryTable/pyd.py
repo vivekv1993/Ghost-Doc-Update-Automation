@@ -1,3 +1,20 @@
+"""
+Query Table Pydantic Data Structure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module defines the strict data structures used by the LangGraph application 
+to enforce structured JSON output from the LLM. 
+
+These models represent the hierarchical structure of an Akamai MDR Query table. 
+The descriptions embedded within each Pydantic Field serve a dual purpose: 
+they document the code for developers, but more importantly, they act as direct 
+prompt instructions for the OpenAI model during data extraction.
+
+Classes:
+    - ColumnData: Schema for individual database column definitions.
+    - QueryData: Schema for sample SQL queries and their expected results.
+    - MDRQueryTable: The root schema representing a complete table definition.
+"""
+
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
